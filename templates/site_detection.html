@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Scam Site Detector</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+</head>
+
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header>
+            <div class="logo">
+                <img src="{{ url_for('static', filename='logo.jpg') }}" alt="ScamGuard Logo" class="brand-logo">
+            </div>
+            <p class="subtitle">Real-time Scam Site Detection</p>
+        </header>
+
+        <!-- Main Content -->
+        <main>
+            <div class="check-box">
+                <h2>Check a Website</h2>
+                <div class="input-group">
+                    <input type="text" id="urlInput" placeholder="Enter website URL (e.g., example.com)"
+                        autocomplete="off">
+                    <button id="checkBtn" onclick="checkUrl()">Check Now</button>
+                    <!-- Loading Spinner -->
+                    <div id="loader" class="loader hidden"></div>
+                </div>
+                <p id="errorMsg" class="error-msg"></p>
+            </div>
+
+            <!-- Result Section -->
+            <div id="resultContainer" class="result-container hidden">
+                <div class="result-card">
+                    <div id="resultIcon" class="result-icon"></div>
+                    <h3 id="resultStatus">Safe</h3>
+                    <p id="resultText">This website appears to be safe.</p>
+
+                    <div class="confidence-section">
+                        <span>Confidence Score:</span>
+                        <div class="progress-bar-bg">
+                            <div id="progressBar" class="progress-bar"></div>
+                        </div>
+                        <span id="confidenceValue">0%</span>
+                    </div>
+
+                    <div class="details">
+                        <h4>Analysis Details:</h4>
+                        <ul id="featuresList">
+                            <!-- Features will be injected here -->
+                        </ul>
+                    </div>
+
+                    <!-- New AI Analysis Section -->
+                    <div class="ai-analysis">
+                        <h4><i class="fas fa-robot"></i> AI Analysis</h4>
+                        <div class="analysis-grid">
+                            <div class="analysis-box bad">
+                                <h5><i class="fas fa-exclamation-circle"></i> Potential Problems</h5>
+                                <ul id="problemsList"></ul>
+                            </div>
+                            <div class="analysis-box good">
+                                <h5><i class="fas fa-check-circle"></i> Good Points</h5>
+                                <ul id="goodPointsList"></ul>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Network Intelligence Section (Deep Scan) -->
+                    <div class="network-intel">
+                        <h4><i class="fas fa-network-wired"></i> Network Intelligence</h4>
+                        <div class="intel-grid">
+                            <!-- Hosting Info -->
+                            <div class="intel-card">
+                                <h5><i class="fas fa-server"></i> Hosting Details</h5>
+                                <table>
+                                    <tr>
+                                        <td>IP Address:</td>
+                                        <td id="scanIP">Loading...</td>
+                                    </tr>
+                                    <tr>
+                                        <td>Location:</td>
+                                        <td id="scanLocation">Loading...</td>
+                                    </tr>
+                                    <tr>
+                                        <td>Provider:</td>
+                                        <td id="scanProvider">Loading...</td>
+                                    </tr>
+                                    <tr>
+                                        <td>Hosted Domains:</td>
+                                        <td id="scanHosted">Loading...</td>
+                                    </tr>
+                                </table>
+                            </div>
+
+                            <!-- SSL Info -->
+                            <div class="intel-card">
+                                <h5><i class="fas fa-lock"></i> SSL Certificate</h5>
+                                <table>
+                                    <tr>
+                                        <td>Issuer:</td>
+                                        <td id="sslIssuer">Loading...</td>
+                                    </tr>
+                                    <tr>
+                                        <td>Expires:</td>
+                                        <td id="sslExpires">Loading...</td>
+                                    </tr>
+                                </table>
+                            </div>
+
+                            <!-- Threat Intel -->
+                            <div class="intel-card full-width">
+                                <h5><i class="fas fa-user-secret"></i> Threat Intel</h5>
+                                <div class="threat-info">
+                                    <p><strong>Passive DNS Count:</strong> <span id="passiveDns">0</span> records found.
+                                    </p>
+                                    <div id="similarUrlsSection">
+                                        <p><strong>Potential Impersonations (Typosquatting):</strong></p>
+                                        <ul id="similarUrlsList"></ul>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Fake URL Score Section -->
+                    <div class="fake-score-section">
+                        <h4><i class="fas fa-skull-crossbones"></i> Fake URL Score</h4>
+                        <div class="score-card">
+                            <div class="score-header">
+                                <span>Risk Level:</span>
+                                <span id="fakeRiskLabel" class="risk-label">Low</span>
+                            </div>
+                            <div class="progress-bar-bg">
+                                <div id="fakeScoreBar" class="progress-bar risk-bar"></div>
+                            </div>
+                            <div class="score-value">
+                                Score: <span id="fakeScoreValue">0</span>/100
+                            </div>
+
+                            <div class="breakdown">
+                                <h5>Breakdown:</h5>
+                                <ul id="fakeScoreList" class="two-col-list">
+                                    <!-- Populated by JS -->
+                                </ul>
+                            </div>
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+        </main>
+
+        <!-- Footer -->
+        <footer>
+            <p>&copy; 2024 ScamGuard Project. All rights reserved.</p>
+        </footer>
+    </div>
+
+    <script src="{{ url_for('static', filename='script.js') }}"></script>
+</body>
+
+</html>
