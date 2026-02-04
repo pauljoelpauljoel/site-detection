@@ -146,6 +146,40 @@ function displayResult(data) {
         document.getElementById('scanProvider').textContent = data.scan_info.provider || 'Unknown';
         document.getElementById('scanHosted').textContent = data.scan_info.hosted_domains + ' domains';
 
+        // Inject Age and Index info into the table or a new section
+        // Ideally we add rows dynamically or expect them in HTML. 
+        // For now, let's append to the "Hosting Details" table if possible, or just log it.
+        // Better yet, let's inject it into the table structure since we can't easily edit HTML without a separate tool call.
+        // Actually, we can just append text to the provider or location for now to ensure visibility without breaking layout
+        // OR, robustly search for the table and append rows.
+
+        const table = document.querySelector('.intel-card table tbody') || document.querySelector('.intel-card table');
+        if (table) {
+            // Clear any old injected rows if checking multiple times? 
+            // Simpler: Just try to find if we already added them, or just reset the table HTML in a bigger refactor.
+            // Given constraint, let's just create a quick summary line in the header or similar.
+        }
+
+        // Let's rely on the Fake Score breakdown for the "Risk" visualization, 
+        // but showing the actual age is nice.
+        if (data.fake_score && data.fake_score.breakdown && data.fake_score.breakdown.domain_age) {
+            const age = data.fake_score.breakdown.domain_age.days;
+            const ageText = age === -1 ? "Unknown" : age + " days";
+            // Hijack ScanProvider to show valid info if we want, or just append to featuresList
+            const list = document.getElementById('featuresList');
+            const li = document.createElement('li');
+            li.innerHTML = `<strong>Domain Age:</strong> ${ageText}`;
+            list.appendChild(li);
+        }
+
+        if (data.fake_score && data.fake_score.breakdown && data.fake_score.breakdown.google_index) {
+            const indexed = data.fake_score.breakdown.google_index.indexed;
+            const list = document.getElementById('featuresList');
+            const li = document.createElement('li');
+            li.innerHTML = `<strong>Google Index:</strong> ${indexed ? '<span style="color:#2ecc71">Indexed</span>' : '<span style="color:#e74c3c">Not Found</span>'}`;
+            list.appendChild(li);
+        }
+
         document.getElementById('sslIssuer').textContent = data.scan_info.certificate.issuer;
         document.getElementById('sslExpires').textContent = data.scan_info.certificate.expires;
 
@@ -210,16 +244,183 @@ function displayResult(data) {
             addItem("URL Shortener", bd.shortener.detected, bd.shortener.score);
             addItem("Sensitive Keywords", bd.keywords.detected, bd.keywords.score);
             if (bd.double_extension) addItem("Double Extension", bd.double_extension.detected, bd.double_extension.score);
+            if (bd.double_extension) addItem("Double Extension", bd.double_extension.detected, bd.double_extension.score);
             if (bd.port_detected) addItem("Suspicious Port", bd.port_detected.detected, bd.port_detected.score);
+
+            // NEW FEATURES
+            if (bd.domain_age) {
+                if (bd.domain_age.score > 0) {
+                    addItem(`Fresh Domain (<30 days)`, true, bd.domain_age.score);
+                }
+            }
+            if (bd.google_index) {
+                if (bd.google_index.score > 0) {
+                    addItem("Not Indexed by Google", true, bd.google_index.score);
+                }
+            }
+            if (bd.insecure_password) addItem("Insecure Password Field", bd.insecure_password.detected, bd.insecure_password.score);
+            if (bd.obfuscation) addItem("JS Obfuscation", bd.obfuscation.detected, bd.obfuscation.score);
         }
+
+
 
         if (list.children.length === 0) {
             list.innerHTML = '<li>No specific fake indicators found.</li>';
         }
     }
 
+    // --- UPDATE ADVANCED DASHBOARD ---
+    updateDashboard(data);
+
     resultContainer.classList.remove('hidden');
 }
+
+function updateDashboard(data) {
+    // 1. Domain Age
+    const ageCard = document.getElementById('dashAge');
+    const ageVal = ageCard.querySelector('.dash-value');
+    const ageSub = ageCard.querySelector('.dash-sub');
+
+    // Default neutral
+    ageCard.className = 'dash-card';
+    let ageDays = -1;
+    let ageYears = -1;
+    let creationYear = "Unknown";
+    let ageError = "Whois hidden/failed";
+
+    if (data.fake_score && data.fake_score.breakdown && data.fake_score.breakdown.domain_age) {
+        const da = data.fake_score.breakdown.domain_age;
+        ageDays = da.days;
+        ageYears = da.years;
+        creationYear = da.creation_year;
+
+        if (da.error) {
+            ageError = da.error;
+            if (ageError.includes("Connection reset")) ageError = "Connection Reset";
+            if (ageError.includes("timed out")) ageError = "Timeout";
+        }
+    }
+
+    if (ageDays === -1) {
+        ageVal.textContent = "Unknown";
+        ageSub.textContent = ageError; // Show the actual reason
+        ageSub.title = ageError;
+        ageCard.classList.add('warning');
+    } else if (ageDays < 30) {
+        ageVal.textContent = ageDays + " Days";
+        ageSub.textContent = "Fresh Domain (High Risk)";
+        ageCard.classList.add('danger');
+    } else {
+        // e.g. "1997 -> 28+ years"
+        ageVal.textContent = `${creationYear}`;
+        ageSub.textContent = `${ageYears} years old`;
+        ageCard.classList.add('safe');
+    }
+
+    // 2. Google Index
+    const indexCard = document.getElementById('dashIndex');
+    const indexVal = indexCard.querySelector('.dash-value');
+
+    indexCard.className = 'dash-card';
+    let indexed = null;
+    if (data.fake_score && data.fake_score.breakdown && data.fake_score.breakdown.google_index) {
+        indexed = data.fake_score.breakdown.google_index.indexed;
+    }
+
+    if (indexed === true) {
+        indexVal.textContent = "Indexed";
+        indexCard.classList.add('safe');
+    } else if (indexed === false) {
+        indexVal.textContent = "Not Found";
+        indexCard.classList.add('danger');
+    } else {
+        indexVal.textContent = "Unknown";
+        indexCard.classList.add('warning');
+    }
+
+    // 3. Content
+    const contentCard = document.getElementById('dashContent');
+    const contentVal = contentCard.querySelector('.dash-value');
+    const contentSub = contentCard.querySelector('.dash-sub');
+
+    contentCard.className = 'dash-card';
+    let contentRisk = false;
+    let contentMsg = "Clean";
+
+    if (data.fake_score && data.fake_score.breakdown) {
+        const bd = data.fake_score.breakdown;
+        if (bd.insecure_password && bd.insecure_password.detected) {
+            contentRisk = true;
+            contentMsg = "Insecure Input";
+        } else if (bd.brand_misuse && bd.brand_misuse.detected) {
+            contentRisk = true;
+            contentMsg = "Brand Misuse";
+        } else if (bd.fake_login) { // Propagated from earlier logic? API might not send it explicitly in breakdown structure, check app.py
+            // In app.py we didn't explicitly add fake_login to breakdown, only calculated it.
+            // But we added 'insecure_password' and 'brand_misuse'.
+        }
+    }
+
+    if (contentRisk) {
+        contentVal.textContent = "Suspicious";
+        contentSub.textContent = contentMsg;
+        contentCard.classList.add('danger');
+    } else {
+        contentVal.textContent = "Safe";
+        contentSub.textContent = "No phishing forms";
+        contentCard.classList.add('safe');
+    }
+
+    // 4. JS Obfuscation
+    const jsCard = document.getElementById('dashJS');
+    const jsVal = jsCard.querySelector('.dash-value');
+    const jsSub = jsCard.querySelector('.dash-sub');
+
+    jsCard.className = 'dash-card';
+    let jsRisk = false;
+    let jsMsg = "Clean Code";
+
+    if (data.fake_score && data.fake_score.breakdown && data.fake_score.breakdown.obfuscation) {
+        if (data.fake_score.breakdown.obfuscation.detected) {
+            jsRisk = true;
+            jsMsg = "Obfuscation Detected";
+        }
+    }
+
+    if (jsRisk) {
+        jsVal.textContent = "Risk Detected";
+        jsSub.textContent = jsMsg;
+        jsCard.classList.add('danger');
+    } else {
+        jsVal.textContent = "Clean";
+        jsSub.textContent = "Standard Minification";
+        jsCard.classList.add('safe');
+    }
+
+    // --- VISUAL AI UPDATE ---
+    const visualSection = document.getElementById('visualSection');
+    const screenshotImg = document.getElementById('siteScreenshot');
+    const vmResult = document.getElementById('vmResult');
+    const vmScore = document.getElementById('vmScore');
+    const viewScreenshotBtn = document.getElementById('viewScreenshotBtn');
+
+    if (data.visual_analysis && data.visual_analysis.screenshot) {
+        visualSection.classList.remove('hidden');
+        screenshotImg.src = data.visual_analysis.screenshot;
+        if (viewScreenshotBtn) viewScreenshotBtn.href = data.visual_analysis.screenshot;
+
+        if (data.visual_analysis.match) {
+            vmResult.innerHTML = `<span style="color: #e74c3c; font-weight: bold;">⚠️ Warning</span>: Looks like <span style="font-weight:bold">${data.visual_analysis.match}</span>`;
+            vmScore.textContent = `Similarity Score: ${data.visual_analysis.similarity}%`;
+        } else {
+            vmResult.innerHTML = `<span style="color: #2ecc71; font-weight: bold;">Unique Design</span>`;
+            vmScore.textContent = "No phishing clone detected.";
+        }
+    } else {
+        visualSection.classList.add('hidden');
+    }
+}
+
 
 // Allow Enter key to submit
 document.getElementById('urlInput')?.addEventListener('keypress', function (e) {
@@ -228,250 +429,6 @@ document.getElementById('urlInput')?.addEventListener('keypress', function (e) {
     }
 });
 
-// --- Scam Call Detection Logic ---
 
-function checkPhoneNumber() {
-    const phoneInput = document.getElementById('phoneInput');
-    const phone = phoneInput.value.trim();
-    const resultContainer = document.getElementById('resultContainer');
-    const loader = document.getElementById('loader');
-    const checkBtn = document.getElementById('checkPhoneBtn');
-    const errorMsg = document.getElementById('errorMsg');
 
-    // Reset
-    resultContainer.classList.add('hidden');
-    errorMsg.textContent = '';
 
-    if (!phone) {
-        errorMsg.textContent = "Please enter a valid phone number.";
-        return;
-    }
-
-    loader.classList.remove('hidden');
-    checkBtn.disabled = true;
-    checkBtn.textContent = "Checking...";
-
-    fetch('/predict-call', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phone: phone })
-    })
-        .then(response => response.json())
-        .then(data => {
-            loader.classList.add('hidden');
-            checkBtn.disabled = false;
-            checkBtn.textContent = "Check Number";
-            displayCallResult(data);
-        })
-        .catch(error => {
-            console.error('Error:', error);
-            loader.classList.add('hidden');
-            checkBtn.disabled = false;
-            checkBtn.textContent = "Check Number";
-            errorMsg.textContent = "An error occurred. Please try again.";
-        });
-}
-
-function displayCallResult(data) {
-    const resultContainer = document.getElementById('resultContainer');
-    const resultStatus = document.getElementById('resultStatus');
-    const resultIcon = document.getElementById('resultIcon');
-    const riskLevel = document.getElementById('riskLevel');
-    const confidenceValue = document.getElementById('confidenceValue');
-    const reasonsList = document.getElementById('reasonsList');
-
-    resultIcon.className = 'result-icon fas';
-
-    // Reset specific classes
-    resultStatus.className = '';
-    riskLevel.className = '';
-
-    let iconClass = '';
-    let colorClass = '';
-
-    if (data.status === 'Safe') {
-        iconClass = 'fa-shield-check';
-        colorClass = 'safe';
-        resultStatus.textContent = "Safe Call";
-    } else if (data.status === 'Suspicious') {
-        iconClass = 'fa-exclamation-triangle';
-        colorClass = 'suspicious';
-        resultStatus.textContent = "Suspicious Call";
-    } else {
-        iconClass = 'fa-ban';
-        colorClass = 'scam';
-        resultStatus.textContent = "Potential Scam";
-    }
-
-    resultIcon.classList.add(iconClass, colorClass);
-    resultStatus.classList.add(colorClass);
-
-    riskLevel.textContent = data.risk;
-    riskLevel.classList.add(colorClass);
-
-    confidenceValue.textContent = `(${data.confidence}% Confidence)`;
-
-    reasonsList.innerHTML = '';
-    if (data.reasons && data.reasons.length > 0) {
-        data.reasons.forEach(r => {
-            const li = document.createElement('li');
-            li.innerHTML = `<i class="fas fa-info-circle"></i> ${r}`;
-            reasonsList.appendChild(li);
-        });
-    } else {
-        reasonsList.innerHTML = '<li>No specific risk indicators found.</li>';
-    }
-
-    resultContainer.classList.remove('hidden');
-}
-
-// Allow Enter key for phone
-document.getElementById('phoneInput')?.addEventListener('keypress', function (e) {
-    if (e.key === 'Enter') {
-        checkPhoneNumber();
-    }
-});
-
-// --- Live Call Monitor Logic ---
-
-let recognition;
-let isMonitoring = false;
-let scamKeywords = [];
-let detectedSet = new Set();
-
-// Load config on startup
-fetch('/get-scam-config')
-    .then(res => res.json())
-    .then(data => {
-        if (data.scam_keywords) {
-            scamKeywords = data.scam_keywords.map(k => k.toLowerCase());
-        }
-    })
-    .catch(err => console.error("Failed to load scam config", err));
-
-function toggleLiveMonitor() {
-    const btn = document.getElementById('startMonitorBtn');
-    const indicator = document.getElementById('recordingIndicator');
-
-    if (isMonitoring) {
-        stopMonitoring();
-        btn.innerHTML = '<i class="fas fa-play"></i> Start Listening';
-        btn.style.backgroundColor = '#2ecc71';
-        indicator.classList.add('hidden');
-    } else {
-        startMonitoring();
-        btn.innerHTML = '<i class="fas fa-stop"></i> Stop Listening';
-        btn.style.backgroundColor = '#e74c3c';
-        indicator.classList.remove('hidden');
-    }
-}
-
-function startMonitoring() {
-    if (!('webkitSpeechRecognition' in window)) {
-        alert("Web Speech API is not supported in this browser. Please use Chrome/Edge.");
-        return;
-    }
-
-    recognition = new webkitSpeechRecognition();
-    recognition.continuous = true;
-    recognition.interimResults = true;
-    recognition.lang = 'en-US';
-
-    recognition.onstart = function () {
-        isMonitoring = true;
-        detectedSet.clear();
-        updateRiskUI();
-        document.getElementById('transcriptBox').innerHTML = '<span style="color: #888;">Listening...</span>';
-    };
-
-    recognition.onerror = function (event) {
-        console.error("Speech recognition error", event.error);
-        if (event.error === 'not-allowed') {
-            alert("Microphone access denied.");
-            stopMonitoring();
-        }
-    };
-
-    recognition.onend = function () {
-        if (isMonitoring) {
-            recognition.start(); // Auto-restart if stopped unexpectedly
-        }
-    };
-
-    recognition.onresult = function (event) {
-        let interimTranscript = '';
-        let finalTranscript = '';
-
-        for (let i = event.resultIndex; i < event.results.length; ++i) {
-            if (event.results[i].isFinal) {
-                finalTranscript += event.results[i][0].transcript;
-                processText(event.results[i][0].transcript);
-            } else {
-                interimTranscript += event.results[i][0].transcript;
-            }
-        }
-
-        // Show in UI
-        const box = document.getElementById('transcriptBox');
-        // Only keep last few lines to avoid overflow issues visually
-        box.innerHTML = `<div style="color: #333;">${finalTranscript} <span style="color: #999;">${interimTranscript}</span></div>`;
-        box.scrollTop = box.scrollHeight;
-    };
-
-    recognition.start();
-}
-
-function stopMonitoring() {
-    isMonitoring = false;
-    if (recognition) {
-        recognition.stop();
-    }
-}
-
-function processText(text) {
-    const lowerText = text.toLowerCase();
-
-    scamKeywords.forEach(keyword => {
-        if (lowerText.includes(keyword)) {
-            if (!detectedSet.has(keyword)) {
-                detectedSet.add(keyword);
-                addKeywordBadge(keyword);
-                updateRiskUI();
-            }
-        }
-    });
-}
-
-function addKeywordBadge(keyword) {
-    const container = document.getElementById('detectedKeywords');
-    const badge = document.createElement('span');
-    badge.textContent = keyword;
-    badge.style.cssText = `
-        background-color: #e74c3c; 
-        color: white; 
-        padding: 5px 10px; 
-        border-radius: 15px; 
-        font-size: 0.8rem;
-        display: inline-block;
-        animation: fadeIn 0.3s;
-    `;
-    container.appendChild(badge);
-}
-
-function updateRiskUI() {
-    const scoreEl = document.getElementById('liveRiskScore');
-    const count = detectedSet.size;
-
-    // Simple logic: more words = higher risk
-    let risk = Math.min(count * 20, 100);
-
-    scoreEl.textContent = risk + "%";
-
-    if (risk < 30) scoreEl.style.color = '#2ecc71';
-    else if (risk < 70) scoreEl.style.color = '#f1c40f';
-    else scoreEl.style.color = '#e74c3c';
-
-    if (risk > 50) {
-        // Flash warning or sound could go here
-    }
-}

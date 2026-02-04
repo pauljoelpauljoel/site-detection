@@ -11,6 +11,8 @@ from urllib.parse import urlparse
 import idna
 import json
 import os
+import whois
+from bs4 import BeautifulSoup
 
 app = Flask(__name__)
 
@@ -194,6 +196,117 @@ def get_deep_scan_info(url):
     
     return info
 
+def get_domain_age(domain):
+    # Helper to clean domain
+    def clean(d):
+        return d.lower().strip()
+
+    try:
+        print(f"DEBUG: Checking whois for {domain}")
+        try:
+            w = whois.whois(domain)
+        except Exception as e:
+             # If exact match fails (e.g. subdomain), try stripping one level
+             parts = domain.split('.')
+             if len(parts) > 2:
+                 parent = '.'.join(parts[1:])
+                 print(f"DEBUG: Exact match failed. Retrying parent: {parent}")
+                 try:
+                    w = whois.whois(parent)
+                 except Exception as sub_e:
+                    return -1, str(sub_e)
+             else:
+                 return -1, str(e)
+
+        creation_date = w.creation_date
+        print(f"DEBUG: Creation date: {creation_date}")
+        
+        if isinstance(creation_date, list):
+            creation_date = creation_date[0]
+            
+        if not creation_date:
+             return -1, "No creation date found"
+             
+        # Handle string dates if any
+        if isinstance(creation_date, str):
+            try:
+                creation_date = datetime.datetime.strptime(creation_date, "%Y-%m-%d %H:%M:%S")
+            except:
+                pass
+                
+        if not isinstance(creation_date, datetime.datetime):
+            return None, "Invalid date format"
+
+        return creation_date, None
+    except Exception as e:
+        print(f"DEBUG: Whois error for {domain}: {e}")
+        return -1, str(e)
+
+def check_google_index(domain):
+    try:
+        query = f"site:{domain}"
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (HTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}
+        url = f"https://www.google.com/search?q={query}"
+        print(f"DEBUG: Checking Google Index for {domain}")
+        resp = requests.get(url, headers=headers, timeout=5)
+        print(f"DEBUG: Google Status Code: {resp.status_code}")
+        if resp.status_code == 200:
+            soup = BeautifulSoup(resp.text, 'html.parser')
+            # Look for search results container. This is brittle but a decent heuristic for a demo.
+            # If "did not match any documents" or similar is found, it's not indexed.
+            if "did not match any documents" in resp.text:
+                return False
+            return True
+        elif resp.status_code == 429:
+             print("DEBUG: Google blocked request (429)")
+             return None
+        return None # Blocked or error
+    except Exception as e:
+        print(f"DEBUG: Google Index error: {e}")
+        return None
+
+def analyze_page_content(url):
+    findings = {
+        'password_field': False,
+        'hidden_forms': False,
+        'obfuscation': [],
+        'fake_login': False
+    }
+    try:
+        resp = requests.get(url, timeout=5)
+        if resp.status_code != 200:
+            return findings
+        
+        soup = BeautifulSoup(resp.text, 'html.parser')
+        html_lower = resp.text.lower()
+        
+        # 1. Password Field
+        if soup.find('input', {'type': 'password'}):
+            findings['password_field'] = True
+            
+        # 2. Hidden Forms/Fields
+        if soup.find('input', {'type': 'hidden'}):
+            # Many legit sites use hidden fields, so maybe only flag if combined with other things?
+            # For now, just detect.
+            findings['hidden_forms'] = True
+
+        # 3. Obfuscation
+        suspicious_js = ['eval(', 'atob(', 'document.write(', 'unescape(']
+        for js in suspicious_js:
+            if js in html_lower:
+                findings['obfuscation'].append(js)
+        
+        # 4. Fake Login (Heuristic)
+        # If password field exists + title/text contains "Login" etc
+        if findings['password_field']:
+            keywords = ['login', 'sign in', 'account', 'verify']
+            if any(k in html_lower for k in keywords):
+                findings['fake_login'] = True
+
+    except:
+        pass
+    return findings
+
 # --- ADVANCED FAKE DETECTION LOGIC ---
 
 def calculate_entropy(text):
@@ -295,112 +408,8 @@ def calculate_fake_url_score(url, scan_info=None):
 
     return score, breakdown
 
-# --- SCAM CALL DETECTION LOGIC ---
 
-SCAM_DATA_FILE = os.path.join(os.path.dirname(__file__), 'data', 'scam_data.json')
-scam_data_cache = None
 
-def load_scam_data():
-    global scam_data_cache
-    if scam_data_cache:
-        return scam_data_cache
-    try:
-        with open(SCAM_DATA_FILE, 'r') as f:
-            scam_data_cache = json.load(f)
-        return scam_data_cache
-    except Exception as e:
-        print(f"Error loading scam data: {e}")
-        return {"scam_prefixes": {}, "blacklist": [], "risk_patterns": {}}
-
-def analyze_phone_number(phone):
-    phone = re.sub(r'[^0-9+]', '', phone) # Sanitize
-    
-    status = "Safe"
-    risk_level = "Low"
-    confidence = 0
-    reasons = []
-    
-    data = load_scam_data()
-    prefixes = data.get('scam_prefixes', {})
-    blacklist = set(data.get('blacklist', []))
-    patterns = data.get('risk_patterns', {})
-    
-    # 0. Basic Validation
-    if not phone:
-        return {"status": "Invalid", "risk": "Unknown", "confidence": 0, "reasons": ["No number provided."]}
-    
-    if len(phone) < 7 or len(phone) > 15:
-         return {"status": "Invalid", "risk": "High", "confidence": 100, "reasons": [f"Invalid length ({len(phone)} digits). Valid numbers are usually 7-15 digits."]}
-
-    # 1. Blacklist Check
-    if phone in blacklist:
-        return {
-            "status": "Scam",
-            "risk": "Critical",
-            "confidence": 100,
-            "reasons": ["Blacklisted: Confirmed scam number in database."],
-            "ml_analysis": None
-        }
-
-    # 2. Key-based Prefix Check
-    # We iterate to find the longest matching prefix
-    matched_prefix_data = None
-    longest_prefix_len = 0
-    
-    for prefix, p_data in prefixes.items():
-        if phone.startswith(prefix):
-            if len(prefix) > longest_prefix_len:
-                longest_prefix_len = len(prefix)
-                matched_prefix_data = p_data
-                matched_prefix_data['prefix'] = prefix
-
-    if matched_prefix_data:
-        status = "Scam"
-        risk_level = matched_prefix_data.get('risk', 'High')
-        confidence += matched_prefix_data.get('confidence_boost', 50)
-        reasons.append(f"Originates from high-risk prefix ({matched_prefix_data['prefix']}) - {matched_prefix_data.get('country', 'Unknown')}.")
-        reasons.append(matched_prefix_data.get('description', 'Known fraud region.'))
-
-    # 3. Pattern Analysis (Regex Rules)
-    for p_name, p_rule in patterns.items():
-        if re.search(p_rule['regex'], phone):
-            # If already flagged as scam, just add confidence
-            if status == "Safe":
-                status = "Suspicious"
-                risk_level = "Medium"
-            
-            confidence += p_rule.get('score', 20)
-            reasons.append(f"Pattern detected: {p_rule.get('description', p_name)}")
-
-    # 4. Final Score Normalization
-    if confidence > 100: confidence = 100
-    if status == "Safe" and confidence == 0:
-        confidence = 95 # High confidence it is safe
-        reasons.append("Number format looks clean. No known risk indicators found.")
-    
-    # Logic for mixed signals (e.g. prefix + pattern could push Suspicious to Scam)
-    if status == "Suspicious" and confidence > 70:
-        status = "Scam"
-        risk_level = "High"
-
-    return {
-        "status": status,
-        "risk": risk_level,
-        "confidence": confidence,
-        "reasons": reasons
-    }
-
-@app.route('/predict-call', methods=['POST'])
-def predict_call():
-    data = request.json
-    phone = data.get('phone', '')
-    result = analyze_phone_number(phone)
-    return jsonify(result)
-
-@app.route('/get-scam-config', methods=['GET'])
-def get_scam_config():
-    data = load_scam_data()
-    return jsonify(data)
 
 
 @app.route('/')
@@ -411,9 +420,7 @@ def home():
 def site_detection():
     return render_template('site_detection.html')
 
-@app.route('/call-detection')
-def call_detection():
-    return render_template('call_detection.html')
+
 
 @app.route('/predict', methods=['POST'])
 def predict():
@@ -451,6 +458,92 @@ def predict():
     
     # Fake URL Score (New)
     fake_score, fake_breakdown = calculate_fake_url_score(url, scan_info)
+
+    # --- ADVANCED FEATURE INTEGRATION ---
+    domain = url.replace('https://', '').replace('http://', '').split('/')[0]
+
+    # 1. Domain Age
+    creation_date, age_error = get_domain_age(domain)
+    
+    age_days = -1
+    age_years = -1
+    creation_year = "Unknown"
+    
+    if creation_date:
+        # Handle timezone awareness (creation_date might be UTC/aware while now() is naive)
+        now = datetime.datetime.now(creation_date.tzinfo)
+        age_days = (now - creation_date).days
+        age_years = round(age_days / 365.25, 1)
+        creation_year = creation_date.year
+    
+    # Always add to breakdown for UI
+    fake_breakdown['domain_age'] = {
+        'days': age_days, 
+        'years': age_years,
+        'creation_year': creation_year,
+        'score': 0, 
+        'error': age_error
+    }
+    
+    if age_days != -1:
+        if age_days < 30:
+            fake_score += 30
+            problems.append(f"Domain is very new ({age_days} days old). Highly suspicious.")
+            fake_breakdown['domain_age']['score'] = 30
+        elif age_days < 180:
+             # Neutral
+             pass
+        else:
+             good_points.append(f"Domain established in {creation_year} ({age_years} years ago).")
+    
+    # 2. Google Index
+    is_indexed = check_google_index(domain)
+    # Always add to breakdown
+    fake_breakdown['google_index'] = {'indexed': is_indexed, 'score': 0}
+
+    if is_indexed is False:
+        fake_score += 20
+        problems.append("Domain does not appear to be indexed by Google.")
+        fake_breakdown['google_index']['score'] = 20
+    elif is_indexed is True:
+        good_points.append("Domain is indexed by Google.")
+
+    # 3. Content Analysis
+    content_findings = analyze_page_content(url)
+    
+    if content_findings['password_field']:
+        # If site is not HTTPS and has password field -> Critical
+        if not is_https:
+            fake_score += 25
+            problems.append("Insecure Page: Password field detected on non-HTTPS site.")
+            fake_breakdown['insecure_password'] = {'detected': True, 'score': 25}
+    
+    if content_findings['obfuscation']:
+        fake_score += 15
+        problems.append(f"Suspicious JavaScript detected: {', '.join(content_findings['obfuscation'])}")
+        fake_breakdown['obfuscation'] = {'detected': True, 'techniques': content_findings['obfuscation'], 'score': 15}
+
+    # --- VISUAL AI (Feature 5) ---
+    fake_breakdown['visual_ai'] = {'detected': False, 'score': 0}
+    visual_match_brand = None
+    visual_score = 0
+    screenshot_b64 = None
+
+    try:
+        import visual_matcher
+        
+        # Get Base64 and Bytes directly
+        screenshot_b64, screenshot_bytes = visual_matcher.capture_screenshot(url)
+        
+        if screenshot_bytes:
+            visual_match_brand, visual_score = visual_matcher.compare_visuals(screenshot_bytes)
+            if visual_match_brand and visual_score > 70:
+                fake_score += 40
+                problems.append(f"Visual AI: Website looks {visual_score}% like {visual_match_brand}.")
+                fake_breakdown['visual_ai'] = {'detected': True, 'brand': visual_match_brand, 'score': visual_score}
+    except Exception as e:
+        print(f"DEBUG: Visual AI Failed: {e}")
+        # Continue without visual ai
 
     # --- ENHANCED RISK CALCULATION ---
     # Adjust confidence/status based on deep scan failures
@@ -500,6 +593,11 @@ def predict():
         'fake_score': {
             'total': fake_score,
             'breakdown': fake_breakdown
+        },
+        'visual_analysis': {
+            'screenshot': f"data:image/png;base64,{screenshot_b64}" if 'screenshot_b64' in locals() and screenshot_b64 else None,
+            'match': 'visual_match_brand' in locals() and visual_match_brand,
+            'similarity': 'visual_score' in locals() and visual_score
         }
     })
 

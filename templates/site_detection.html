@@ -56,6 +56,64 @@
                         </ul>
                     </div>
 
+                    <!-- ADVANCED DASHBOARD (NEW) -->
+                    <div class="advanced-dashboard">
+                        <!-- 1. Domain Age -->
+                        <div id="dashAge" class="dash-card">
+                            <i class="fas fa-calendar-alt dash-icon"></i>
+                            <div class="dash-title">DOMAIN AGE</div>
+                            <div class="dash-value">Checking...</div>
+                            <div class="dash-sub">Whois Data</div>
+                        </div>
+
+                        <!-- 2. Google Index -->
+                        <div id="dashIndex" class="dash-card">
+                            <i class="fab fa-google dash-icon"></i>
+                            <div class="dash-title">GOOGLE INDEX</div>
+                            <div class="dash-value">Checking...</div>
+                            <div class="dash-sub">Search Status</div>
+                        </div>
+
+                        <!-- 3. Page Content -->
+                        <div id="dashContent" class="dash-card">
+                            <i class="fas fa-file-code dash-icon"></i>
+                            <div class="dash-title">PAGE CONTENT</div>
+                            <div class="dash-value">Checking...</div>
+                            <div class="dash-sub">HTML Analysis</div>
+                        </div>
+
+                        <!-- 4. JS Obfuscation -->
+                        <div id="dashJS" class="dash-card">
+                            <i class="fas fa-code dash-icon"></i>
+                            <div class="dash-title">JAVASCRIPT</div>
+                            <div class="dash-value">Checking...</div>
+                            <div class="dash-sub">Code Audit</div>
+                        </div>
+                    </div>
+
+                    <!-- VISUAL AI SECTION (Feature 5) -->
+                    <div id="visualSection" class="result-card hidden" style="margin-top: 20px; text-align:center;">
+                        <h4><i class="fas fa-eye"></i> Visual AI Analysis</h4>
+                        <div
+                            style="display: flex; gap: 20px; justify-content: center; align-items: flex-start; flex-wrap: wrap;">
+                            <div class="screenshot-box">
+                                <h5>Live Screenshot</h5>
+                                <img id="siteScreenshot" src="" alt="Site Screenshot"
+                                    style="max-width: 100%; height: auto; border: 2px solid #ddd; border-radius: 8px;">
+                            </div>
+                            <div class="visual-result-box" style=" max-width: 300px; text-align: left;">
+                                <h5 id="vmTitle">Brand Match Check</h5>
+                                <div id="vmResult" style="font-size: 1.1rem; margin-top: 10px;">Analyzing...</div>
+                                <div id="vmScore" style="color: #666; font-size: 0.9rem;"></div>
+                                <a id="viewScreenshotBtn" href="#" target="_blank"
+                                    style="display:inline-block; margin-top:15px; background:#4a90e2; color:white; padding:8px 15px; text-decoration:none; border-radius:5px; font-size:0.9rem;">
+                                    View Full Screenshot
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+
+
                     <!-- New AI Analysis Section -->
                     <div class="ai-analysis">
                         <h4><i class="fas fa-robot"></i> AI Analysis</h4>
