@@ -4,3 +4,9 @@ pandas
 numpy
 gunicorn
 pickle-mixin
+requests
+python-whois
+selenium
+webdriver-manager
+imagehash
+Pillow
