@@ -1,6 +1,7 @@
 from flask import Flask, render_template, request, jsonify
 import pickle
 import numpy as np
+import pandas as pd
 import re
 import socket
 import ssl
@@ -440,11 +441,25 @@ def predict():
              url = 'http://' + url
 
     features = extract_features(url)
-    features_np = np.array([features])
-    
-    prediction = model.predict(features_np)[0]
-    probabilities = model.predict_proba(features_np)[0]
-    confidence = round(max(probabilities) * 100, 2)
+    try:
+        # Create DataFrame with feature names to avoid sklearn UserWarning
+        feature_names = ['url_length', 'has_ip', 'has_at', 'dot_count', 'is_https']
+        features_df = pd.DataFrame([features], columns=feature_names)
+        
+        prediction = model.predict(features_df)[0]
+        probabilities = model.predict_proba(features_df)[0]
+        confidence = round(max(probabilities) * 100, 2)
+    except Exception as e:
+        print(f"Prediction Error: {e}")
+        # Fallback to numpy array if DataFrame fails (backward compatibility)
+        try:
+            print("Attempting fallback to numpy array...")
+            features_np = np.array([features])
+            prediction = model.predict(features_np)[0]
+            probabilities = model.predict_proba(features_np)[0]
+            confidence = round(max(probabilities) * 100, 2)
+        except Exception as e2:
+             return jsonify({'error': f"Prediction failed: {str(e2)}"}), 500
     
     # 0: Safe, 1: Suspicious, 2: Scam
     status_map = {0: 'Safe', 1: 'Suspicious', 2: 'Scam'}
@@ -543,6 +558,7 @@ def predict():
                 fake_breakdown['visual_ai'] = {'detected': True, 'brand': visual_match_brand, 'score': visual_score}
     except Exception as e:
         print(f"DEBUG: Visual AI Failed: {e}")
+        visual_ai_error = str(e)
         # Continue without visual ai
 
     # --- ENHANCED RISK CALCULATION ---
@@ -597,9 +613,10 @@ def predict():
         'visual_analysis': {
             'screenshot': f"data:image/png;base64,{screenshot_b64}" if 'screenshot_b64' in locals() and screenshot_b64 else None,
             'match': 'visual_match_brand' in locals() and visual_match_brand,
-            'similarity': 'visual_score' in locals() and visual_score
+            'similarity': 'visual_score' in locals() and visual_score,
+            'error': visual_ai_error if 'visual_ai_error' in locals() else None
         }
     })
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    app.run(debug=True, use_reloader=False)
